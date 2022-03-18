@@ -1,0 +1,12 @@
+aws:
+  access_key_id: <%= ENV['AWS_ACCESS_KEY_ID'] %>
+  receive_message:
+    attribute_names:
+    - ApproximateReceiveCount
+    - SentTimestamp
+  region: <%= ENV['AWS_REGION'] %>
+  secret_access_key:  <%= ENV['AWS_SECRET_ACCESS_KEY'] %>
+concurrency: 25
+delay: 0
+queues:
+   - http://localstack:4566/000000000000/checkout-completed-queue

@@ -1,0 +1,102 @@
+version: '3'
+services:
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./store/tmp/db:/var/lib/postgresql/data
+      - ./store:/myapp
+    ports:
+      - "5432:5432"
+
+  localstack:
+    image: localstack/localstack:0.12.18
+    container_name: localstack
+    ports:
+      - 4566:4566
+    environment:
+      - SERVICES=sqs
+      - DEFAULT_REGION=us-east-1
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      # - './.localstack:/tmp/localstack'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - ./awslocal/scripts:/docker-entrypoint-initaws.d
+
+  dd_agent:
+    image: datadog/agent:latest
+    environment:
+      - DD_API_KEY=1234567890abcdef
+      - DD_ENV=env
+
+  store:
+    image: store:0.0.1-ruby-3.1.0
+    build:
+      context: ./store
+      dockerfile: Dockerfile.rails
+    command: bash -c "rm -f tmp/pids/server.pid && bundle exec rails s -p 3000 -b '0.0.0.0'"
+    volumes:
+      - ./store:/myapp
+      - ./store/tmp/bundle:/bundle
+      - ./store/tmp/logs:/logs
+    environment:
+      RAILS_ENV: "development"
+      BUNDLE_PATH: "/bundle/vendor/ruby-3-1-0"
+      DISABLE_DATABASE_ENVIRONMENT_CHECK: 1
+      AWS_REGION: "us-east-1"
+      DD_TRACE_AGENT_URL: "http://dd_agent:8126"
+      AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE"
+      AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      AWS_SQS_ENDPOINT: "http://localstack:4566"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    links:
+      - db
+    tty: true
+    stdin_open: true
+
+  store-shoryuken:
+    image: store:0.0.1-ruby-3.1.0
+    build:
+      context: ./store
+      dockerfile: Dockerfile.rails
+    command: bash -c "bundle exec shoryuken -R -r ./app/workers -C ./shoryuken.yml"
+    volumes:
+      - ./store:/myapp
+      - ./store/tmp/bundle:/bundle
+      - ./store/tmp/logs:/logs
+    environment:
+      RAILS_ENV: "development"
+      BUNDLE_PATH: "/bundle/vendor/ruby-3-1-0"
+      AWS_REGION: "us-east-1"
+      DD_TRACE_AGENT_URL: "http://dd_agent:8126"
+      AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE"
+      AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      AWS_SQS_ENDPOINT: "http://localstack:4566"
+    depends_on:
+      - db
+      - localstack
+    links:
+      - db
+    tty: true
+    stdin_open: true
+
+  checkout_service:
+    build:
+      context: ./checkout_service
+      dockerfile: Dockerfile.golang
+    command: bash -c "go install github.com/cosmtrek/air@latest && air"
+    volumes:
+      - ./checkout_service:/myapp
+      - ./checkout_service/go-modules:/go/pkg/mod
+    image: checkout_service:0.0.1
+    ports:
+      - "8080:8080"
+    environment:
+      DD_AGENT_HOST: "dd_agent"
+      DD_PROPAGATION_STYLE_INJECT: B3,Datadog
